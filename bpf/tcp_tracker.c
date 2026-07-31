@@ -14,10 +14,31 @@ struct event {
     u8 comm[16];
 };
 
+struct conn_key {
+    u32 saddr;
+    u32 daddr;
+    u16 sport;
+    u16 dport; 
+} __attribute__((packed));
+
+struct conn_stats {
+    u64 tx_bytes;
+    u64 rx_bytes;
+    u64 tx_packets;
+    u64 rx_packets;
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 24);
 } events SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, struct conn_key);
+    __type(value, struct conn_stats);
+} conn_stats_map SEC(".maps");
 
 SEC("kprobe/tcp_connect")
 int BPF_KPROBE(trace_tcp_connect, struct sock *sk) {
