@@ -36,6 +36,8 @@ const (
 	TcpTrackerMapConnStatsMap     = "conn_stats_map"
 	TcpTrackerMapEvents           = "events"
 	TcpTrackerProgTraceTcpConnect = "trace_tcp_connect"
+	TcpTrackerProgTraceTcpRecvmsg = "trace_tcp_recvmsg"
+	TcpTrackerProgTraceTcpSendmsg = "trace_tcp_sendmsg"
 )
 
 // LoadTcpTracker returns the embedded CollectionSpec for TcpTracker.
@@ -81,6 +83,8 @@ type TcpTrackerSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type TcpTrackerProgramSpecs struct {
 	TraceTcpConnect *ebpf.ProgramSpec `ebpf:"trace_tcp_connect"`
+	TraceTcpRecvmsg *ebpf.ProgramSpec `ebpf:"trace_tcp_recvmsg"`
+	TraceTcpSendmsg *ebpf.ProgramSpec `ebpf:"trace_tcp_sendmsg"`
 }
 
 // TcpTrackerMapSpecs contains maps before they are loaded into the kernel.
@@ -139,11 +143,15 @@ type TcpTrackerVariables struct {
 // It can be passed to LoadTcpTrackerObjects or ebpf.CollectionSpec.LoadAndAssign.
 type TcpTrackerPrograms struct {
 	TraceTcpConnect *ebpf.Program `ebpf:"trace_tcp_connect"`
+	TraceTcpRecvmsg *ebpf.Program `ebpf:"trace_tcp_recvmsg"`
+	TraceTcpSendmsg *ebpf.Program `ebpf:"trace_tcp_sendmsg"`
 }
 
 func (p *TcpTrackerPrograms) Close() error {
 	return _TcpTrackerClose(
 		p.TraceTcpConnect,
+		p.TraceTcpRecvmsg,
+		p.TraceTcpSendmsg,
 	)
 }
 

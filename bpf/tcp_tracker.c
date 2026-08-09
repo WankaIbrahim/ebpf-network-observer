@@ -57,4 +57,47 @@ int BPF_KPROBE(trace_tcp_connect, struct sock *sk) {
     return 0;
 } 
 
+SEC("kprobe/tcp_sendmsg")
+int BPF_KPROBE(trace_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t size){
+    struct conn_key key = {};
+    key.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+    key.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+    key.sport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+    key.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+
+    struct conn_stats *stats = bpf_map_lookup_elem(&conn_stats_map, &key);
+    if (!stats) {
+        struct conn_stats new_stats = {};
+        bpf_map_update_elem(&conn_stats_map, &key, &new_stats, BPF_NOEXIST);
+        stats = bpf_map_lookup_elem(&conn_stats_map, &key);
+        if (!stats) return 0;
+    }
+
+    __sync_fetch_and_add(&stats->tx_bytes, size);
+    __sync_fetch_and_add(&stats->tx_packets, 1);
+    return 0;
+}
+
+SEC("kprobe/tcp_recvmsg")
+int BPF_KPROBE(trace_tcp_recvmsg, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len){
+    struct conn_key  key = {};
+    key.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+    key.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+    key.sport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+    key.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+
+    struct conn_stats *stats = bpf_map_lookup_elem(&conn_stats_map, &key);
+    if (!stats) {
+        struct conn_stats new_stats = {};
+        bpf_map_update_elem(&conn_stats_map, &key, &new_stats, BPF_NOEXIST);
+        stats = bpf_map_lookup_elem(&conn_stats_map, &key);
+        if (!stats) return 0;
+    }
+
+    __sync_fetch_and_add(&stats->rx_bytes, len);
+    __sync_fetch_and_add(&stats->rx_packets, 1);
+    return 0;
+}
+    
+
 char LICENSE[] SEC("license") = "GPL";

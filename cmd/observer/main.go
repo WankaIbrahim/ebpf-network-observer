@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -29,11 +30,23 @@ func main() {
 	}
 	defer objs.Close()
 
-	kp, err := link.Kprobe("tcp_connect", objs.TcpTrackerPrograms.TraceTcpConnect, nil)
+	kpConnect, err := link.Kprobe("tcp_connect", objs.TcpTrackerPrograms.TraceTcpConnect, nil)
 	if err != nil {
-		log.Fatalf("attaching kprobe: %v", err)
+		log.Fatalf("attaching tcp_connect kprobe: %v", err)
 	}
-	defer kp.Close()
+	defer kpConnect.Close()
+
+	kpSend, err := link.Kprobe("tcp_sendmsg", objs.TcpTrackerPrograms.TraceTcpSendmsg, nil)
+	if err != nil {
+		log.Fatalf("attaching tcp_sendmsg kprobe: %v", err)
+	}
+	defer kpSend.Close()
+
+	kpRecv, err := link.Kprobe("tcp_recvmsg", objs.TcpTrackerPrograms.TraceTcpRecvmsg, nil)
+	if err != nil {
+		log.Fatalf("attaching tcp_recvmsg kprobe: %v", err)
+	}
+	defer kpRecv.Close()
 
 	stopc := make(chan os.Signal, 1)
 	signal.Notify(stopc, syscall.SIGINT, syscall.SIGTERM)
@@ -53,7 +66,54 @@ func main() {
 		Comm  [16]byte
 	}
 
+	type ConnKey struct {
+		Saddr uint32
+		Daddr uint32
+		Sport uint16
+		Dport uint16
+	}
+
+	type ConnStats struct {
+		TxBytes uint64
+		RxBytes uint64
+		TxPackets uint64
+		RxPackets uint64
+	}
+
 	fmt.Println("Listening for TCP connections... Press Ctrl+c to stop")
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <- stopc:
+				return
+			case <- ticker.C:
+				fmt.Println("\n--- Connection Stats ---")
+
+				var key ConnKey
+				var stats ConnStats
+			
+				iter := objs.TcpTrackerMaps.ConnStatsMap.Iterate()
+				for iter.Next(&key, &stats) {
+					src := net.IP(intToBytes(key.Saddr))
+					dst := net.IP(intToBytes(key.Daddr))
+					fmt.Printf("SRC: %-20s DST: %-20s TX: %d bytes (%d packets) RX: %d bytes (%d packets)\n",
+						fmt.Sprintf("%s:%d", src, key.Sport),
+						fmt.Sprintf("%s:%d", dst, key.Dport),
+						stats.TxBytes, stats.TxPackets,
+						stats.RxBytes, stats.RxPackets	)
+				}
+
+				if err := iter.Err(); err != nil {
+					log.Printf("iterating map: %v", err)
+				}			
+			}
+		}
+
+	}()
 
 	go func() {
 		<-stopc
