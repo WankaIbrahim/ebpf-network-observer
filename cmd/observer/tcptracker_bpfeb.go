@@ -29,15 +29,25 @@ type TcpTrackerConnStats struct {
 	RxPackets uint64
 }
 
+type TcpTrackerLatencyKey struct {
+	_     structs.HostLayout
+	Saddr uint32
+	Daddr uint32
+	Dport uint16
+}
+
 // Names of all BPF objects in the ELF.
 //
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
-	TcpTrackerMapConnStatsMap     = "conn_stats_map"
-	TcpTrackerMapEvents           = "events"
-	TcpTrackerProgTraceTcpConnect = "trace_tcp_connect"
-	TcpTrackerProgTraceTcpRecvmsg = "trace_tcp_recvmsg"
-	TcpTrackerProgTraceTcpSendmsg = "trace_tcp_sendmsg"
+	TcpTrackerMapConnConnectTime        = "conn_connect_time"
+	TcpTrackerMapConnStartTime          = "conn_start_time"
+	TcpTrackerMapConnStatsMap           = "conn_stats_map"
+	TcpTrackerMapEvents                 = "events"
+	TcpTrackerProgTraceInetSockSetState = "trace_inet_sock_set_state"
+	TcpTrackerProgTraceTcpConnect       = "trace_tcp_connect"
+	TcpTrackerProgTraceTcpRecvmsg       = "trace_tcp_recvmsg"
+	TcpTrackerProgTraceTcpSendmsg       = "trace_tcp_sendmsg"
 )
 
 // LoadTcpTracker returns the embedded CollectionSpec for TcpTracker.
@@ -82,17 +92,20 @@ type TcpTrackerSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type TcpTrackerProgramSpecs struct {
-	TraceTcpConnect *ebpf.ProgramSpec `ebpf:"trace_tcp_connect"`
-	TraceTcpRecvmsg *ebpf.ProgramSpec `ebpf:"trace_tcp_recvmsg"`
-	TraceTcpSendmsg *ebpf.ProgramSpec `ebpf:"trace_tcp_sendmsg"`
+	TraceInetSockSetState *ebpf.ProgramSpec `ebpf:"trace_inet_sock_set_state"`
+	TraceTcpConnect       *ebpf.ProgramSpec `ebpf:"trace_tcp_connect"`
+	TraceTcpRecvmsg       *ebpf.ProgramSpec `ebpf:"trace_tcp_recvmsg"`
+	TraceTcpSendmsg       *ebpf.ProgramSpec `ebpf:"trace_tcp_sendmsg"`
 }
 
 // TcpTrackerMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type TcpTrackerMapSpecs struct {
-	ConnStatsMap *ebpf.MapSpec `ebpf:"conn_stats_map"`
-	Events       *ebpf.MapSpec `ebpf:"events"`
+	ConnConnectTime *ebpf.MapSpec `ebpf:"conn_connect_time"`
+	ConnStartTime   *ebpf.MapSpec `ebpf:"conn_start_time"`
+	ConnStatsMap    *ebpf.MapSpec `ebpf:"conn_stats_map"`
+	Events          *ebpf.MapSpec `ebpf:"events"`
 }
 
 // TcpTrackerVariableSpecs contains global variables before they are loaded into the kernel.
@@ -121,12 +134,16 @@ func (o *TcpTrackerObjects) Close() error {
 //
 // It can be passed to LoadTcpTrackerObjects or ebpf.CollectionSpec.LoadAndAssign.
 type TcpTrackerMaps struct {
-	ConnStatsMap *ebpf.Map `ebpf:"conn_stats_map"`
-	Events       *ebpf.Map `ebpf:"events"`
+	ConnConnectTime *ebpf.Map `ebpf:"conn_connect_time"`
+	ConnStartTime   *ebpf.Map `ebpf:"conn_start_time"`
+	ConnStatsMap    *ebpf.Map `ebpf:"conn_stats_map"`
+	Events          *ebpf.Map `ebpf:"events"`
 }
 
 func (m *TcpTrackerMaps) Close() error {
 	return _TcpTrackerClose(
+		m.ConnConnectTime,
+		m.ConnStartTime,
 		m.ConnStatsMap,
 		m.Events,
 	)
@@ -142,13 +159,15 @@ type TcpTrackerVariables struct {
 //
 // It can be passed to LoadTcpTrackerObjects or ebpf.CollectionSpec.LoadAndAssign.
 type TcpTrackerPrograms struct {
-	TraceTcpConnect *ebpf.Program `ebpf:"trace_tcp_connect"`
-	TraceTcpRecvmsg *ebpf.Program `ebpf:"trace_tcp_recvmsg"`
-	TraceTcpSendmsg *ebpf.Program `ebpf:"trace_tcp_sendmsg"`
+	TraceInetSockSetState *ebpf.Program `ebpf:"trace_inet_sock_set_state"`
+	TraceTcpConnect       *ebpf.Program `ebpf:"trace_tcp_connect"`
+	TraceTcpRecvmsg       *ebpf.Program `ebpf:"trace_tcp_recvmsg"`
+	TraceTcpSendmsg       *ebpf.Program `ebpf:"trace_tcp_sendmsg"`
 }
 
 func (p *TcpTrackerPrograms) Close() error {
 	return _TcpTrackerClose(
+		p.TraceInetSockSetState,
 		p.TraceTcpConnect,
 		p.TraceTcpRecvmsg,
 		p.TraceTcpSendmsg,

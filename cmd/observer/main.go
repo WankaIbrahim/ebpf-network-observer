@@ -48,6 +48,12 @@ func main() {
 	}
 	defer kpRecv.Close()
 
+	tp, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TcpTrackerPrograms.TraceInetSockSetState, nil)
+	if err != nil {
+		log.Fatalf("attaching inet_sock_set_state tracepoint: %v", err)
+	}
+	defer tp.Close()
+
 	stopc := make(chan os.Signal, 1)
 	signal.Notify(stopc, syscall.SIGINT, syscall.SIGTERM)
 
@@ -59,6 +65,7 @@ func main() {
 	defer rd.Close()
 
 	type Event struct {
+		LatencyNs uint64
 		Pid   uint32
 		Saddr uint32
 		Daddr uint32
@@ -139,11 +146,16 @@ func main() {
 
 		src := net.IP(intToBytes(event.Saddr))
 		dst := net.IP(intToBytes(event.Daddr))
-		comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
 
-		fmt.Printf("PID: %-6d COMM: %-20s SRC: %-20s DST: %s:%d\n",
-			event.Pid, comm, src, dst, event.Dport)
+		if event.LatencyNs > 0 {
+			fmt.Printf("LATENCY: %s -> %s:%d took %.2fms to establish\n",
+				src, dst, event.Dport, float64(event.LatencyNs)/1e6)
+		} else {
+			comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
 
+			fmt.Printf("PID: %-6d COMM: %-20s SRC: %-20s DST: %s:%d\n",
+				event.Pid, comm, src, dst, event.Dport)
+		}
 	}
 
 }
