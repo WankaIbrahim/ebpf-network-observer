@@ -64,10 +64,10 @@ sudo ./observer
 - Per-connection byte and packet counting in both directions (TX/RX)
 - Live throughput stats polled from the kernel every two seconds
 - Clean shutdown on Ctrl+C with automatic kprobe detachment
+- Connection establishment latency measurement (SYN_SENT → ESTABLISHED)
 
 ## Planned
 
-- Connection lifecycle tracking and latency measurement (connect latency, connection duration)
 - Prometheus metrics endpoint
 - Grafana dashboard
 - Kubernetes DaemonSet deployment with pod-level flow attribution
