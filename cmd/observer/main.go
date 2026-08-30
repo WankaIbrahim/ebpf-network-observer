@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -87,7 +89,23 @@ func main() {
 		RxPackets uint64
 	}
 
+	type reported struct {
+		txBytes uint64
+		rxBytes uint64
+		txPackets uint64
+		rxPackets uint64
+	}
+	lastReported := make(map[ConnKey]reported)
+
 	fmt.Println("Listening for TCP connections... Press Ctrl+c to stop")
+
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		log.Println("Serving metrics on :2112/metrics")
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			log.Fatalf("serving metrics: %v", err)
+		}
+	}()
 
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
@@ -102,9 +120,25 @@ func main() {
 
 				var key ConnKey
 				var stats ConnStats
+				var count int
 			
 				iter := objs.TcpTrackerMaps.ConnStatsMap.Iterate()
 				for iter.Next(&key, &stats) {
+					count++
+					last := lastReported[key]
+
+					bytesTotal.WithLabelValues("tx").Add(float64(stats.TxBytes - last.txBytes))
+					bytesTotal.WithLabelValues("rx").Add(float64(stats.RxBytes - last.rxBytes))
+					packetsTotal.WithLabelValues("tx").Add(float64(stats.TxPackets - last.txPackets))
+					packetsTotal.WithLabelValues("rx").Add(float64(stats.RxPackets - last.rxPackets))
+
+					lastReported[key] = reported{
+						txBytes:   stats.TxBytes,
+						rxBytes:   stats.RxBytes,
+						txPackets: stats.TxPackets,
+						rxPackets: stats.RxPackets,
+					}
+
 					src := net.IP(intToBytes(key.Saddr))
 					dst := net.IP(intToBytes(key.Daddr))
 					fmt.Printf("SRC: %-20s DST: %-20s TX: %d bytes (%d packets) RX: %d bytes (%d packets)\n",
@@ -113,6 +147,8 @@ func main() {
 						stats.TxBytes, stats.TxPackets,
 						stats.RxBytes, stats.RxPackets	)
 				}
+
+				activeConnections.Set(float64(count))
 
 				if err := iter.Err(); err != nil {
 					log.Printf("iterating map: %v", err)
@@ -148,11 +184,12 @@ func main() {
 		dst := net.IP(intToBytes(event.Daddr))
 
 		if event.LatencyNs > 0 {
+			connectLatency.Observe(float64(event.LatencyNs) / 1e9)
 			fmt.Printf("LATENCY: %s -> %s:%d took %.2fms to establish\n",
 				src, dst, event.Dport, float64(event.LatencyNs)/1e6)
 		} else {
+			connectionsTotal.Inc()
 			comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
-
 			fmt.Printf("PID: %-6d COMM: %-20s SRC: %-20s DST: %s:%d\n",
 				event.Pid, comm, src, dst, event.Dport)
 		}
