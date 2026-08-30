@@ -126,6 +126,9 @@ func main() {
 				for iter.Next(&key, &stats) {
 					count++
 					last := lastReported[key]
+					if stats. TxBytes < last.txBytes {
+						last = reported{}
+					}
 
 					bytesTotal.WithLabelValues("tx").Add(float64(stats.TxBytes - last.txBytes))
 					bytesTotal.WithLabelValues("rx").Add(float64(stats.RxBytes - last.rxBytes))

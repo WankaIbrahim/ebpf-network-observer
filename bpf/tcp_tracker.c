@@ -6,12 +6,18 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 
+#define EVENT_TYPE_CONNECT 0
+#define EVENT_TYPE_LATENCY 1
+#define EVENT_TYPE_CLOSE 2
+
 struct event {
     u64 latency_ns;
+    u64 duration_ns;
     u32 pid;
     u32 saddr;
     u32 daddr;
     u16 dport;
+    u8 event_type;
     u8 comm[16];
 };
 
@@ -41,7 +47,7 @@ struct {
 } events SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
     __type(key, struct conn_key);
     __type(value, struct conn_stats);
@@ -71,6 +77,7 @@ int BPF_KPROBE(trace_tcp_connect, struct sock *sk) {
     e->saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
     e->daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
     e->dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+    e->event_type = EVENT_TYPE_CONNECT;
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     
@@ -83,7 +90,7 @@ int BPF_KPROBE(trace_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t si
     struct conn_key key = {};
     key.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
     key.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
-    key.sport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+    key.sport = BPF_CORE_READ(sk, __sk_common.skc_num);
     key.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
 
     struct conn_stats *stats = bpf_map_lookup_elem(&conn_stats_map, &key);
@@ -104,7 +111,7 @@ int BPF_KPROBE(trace_tcp_recvmsg, struct sock *sk, struct msghdr *msg, size_t le
     struct conn_key  key = {};
     key.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
     key.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
-    key.sport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+    key.sport = BPF_CORE_READ(sk, __sk_common.skc_num);
     key.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
 
     struct conn_stats *stats = bpf_map_lookup_elem(&conn_stats_map, &key);
@@ -155,10 +162,11 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
 
             struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (e) {
+                e->latency_ns = latency;
                 e->saddr = key.saddr;
                 e->daddr = key.daddr;
                 e->dport = key.dport;
-                e->latency_ns = latency;
+                e->event_type = EVENT_TYPE_LATENCY;
 
                 bpf_ringbuf_submit(e, 0);
             }
@@ -168,8 +176,27 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     if (newstate == BPF_TCP_CLOSE) {
         u64 *connected_at = bpf_map_lookup_elem(&conn_connect_time, &key);
         if (connected_at) {
+            u64 duration = now - *connected_at;
             bpf_map_delete_elem(&conn_connect_time, &key);
-            bpf_map_delete_elem(&conn_stats_map, &key);
+
+            struct conn_key stats_key = {};
+            stats_key.saddr = key.saddr;
+            stats_key.daddr = key.daddr;
+            stats_key.sport = BPF_CORE_READ(ctx, sport);
+            stats_key.dport = key.dport;
+
+            bpf_map_delete_elem(&conn_stats_map, &stats_key);
+
+            struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+            if (e) {
+                e->duration_ns = duration;
+                e->saddr = key.saddr;
+                e->daddr = key.daddr;
+                e->dport = key.dport;
+                e->event_type = EVENT_TYPE_CLOSE;
+
+                bpf_ringbuf_submit(e, 0);
+            }
         }
     }
 
