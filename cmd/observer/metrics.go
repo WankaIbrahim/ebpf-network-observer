@@ -37,9 +37,16 @@ var activeConnections = promauto.NewGauge(
 
 var connectLatency = promauto.NewHistogram(
 	prometheus.HistogramOpts{
-		Name: "ebpf_network_connect_latency_seconds",
-		Help: "TCP connection establishment latency in seconds",
+		Name:    "ebpf_network_connect_latency_seconds",
+		Help:    "TCP connection establishment latency in seconds",
 		Buckets: prometheus.ExponentialBuckets(0.0001, 2, 14),
 	},
 )
 
+var connectionDuration = promauto.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "ebpf_network_connection_duration_seconds",
+		Help:    "TCP connection lifetime in seconds.",
+		Buckets: prometheus.ExponentialBuckets(0.001, 3, 12),
+	},
+)
