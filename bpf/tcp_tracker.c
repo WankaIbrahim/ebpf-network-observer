@@ -228,15 +228,23 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
         if (connected_at) {
             u64 duration = now - *connected_at;
             bpf_map_delete_elem(&conn_connect_time, &key);
-
+            
             struct conn_key stats_key = {};
             stats_key.saddr = key.saddr;
             stats_key.daddr = key.daddr;
             stats_key.sport = BPF_CORE_READ(ctx, sport);
             stats_key.dport = key.dport;
-
             bpf_map_delete_elem(&conn_stats_map, &stats_key);
+
+            struct conn_key mirror_key = {};
+            mirror_key.saddr = key.daddr;
+            mirror_key.daddr = key.saddr;
+            mirror_key.sport = key.dport;
+            mirror_key.dport = BPF_CORE_READ(ctx, sport);
+            bpf_map_delete_elem(&conn_stats_map, &mirror_key);
+
             bpf_map_delete_elem(&conn_pid_map, &key);
+            bpf_map_delete_elem(&conn_pid_map, &mirror_key);
 
             struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (e) {

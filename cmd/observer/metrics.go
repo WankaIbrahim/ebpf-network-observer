@@ -47,6 +47,22 @@ var connectionDuration = promauto.NewHistogram(
 	prometheus.HistogramOpts{
 		Name:    "ebpf_network_connection_duration_seconds",
 		Help:    "TCP connection lifetime in seconds.",
-		Buckets: prometheus.ExponentialBuckets(0.001, 3, 12),
+		Buckets: prometheus.ExponentialBuckets(0.001, 4, 12),
 	},
+)
+
+var processBytesTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "ebpf_network_process_bytes_total",
+		Help: "Total bytes transferred, by process and direction.",
+	},
+	[]string{"process", "direction"},
+)
+
+var processConnectionsActive = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "ebpf_network_process_connections_active",
+		Help: "Number of active connections, by process.",
+	},
+	[]string{"process"},
 )

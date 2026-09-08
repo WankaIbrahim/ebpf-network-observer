@@ -30,9 +30,15 @@ const (
 
 	metricsAddr  = ":2112"
 	pollInterval = 2 * time.Second
+
+	maxProcessLabels = 150
 )
 
-var verbose = flag.Bool("v", false, "print individual events to stdout")
+var (
+	verbose = flag.Bool("v", false, "print individual events to stdout")
+
+	seenProcesses = make(map[string]bool)
+)
 
 type Event struct {
 	LatencyNs  uint64
@@ -142,7 +148,7 @@ func attachProbes(objs *TcpTrackerObjects) ([]link.Link, error) {
 	}
 	links = append(links, tp)
 
-	krAccept, err := link.Kretprobe("inet_csk_accept", objs.TcpTrackerPrograms.TraceInetCskAccept, nil);
+	krAccept, err := link.Kretprobe("inet_csk_accept", objs.TcpTrackerPrograms.TraceInetCskAccept, nil)
 	if err != nil {
 		closeLinks(links)
 		return nil, fmt.Errorf("inet_csk_accept kretprobe: %w", err)
@@ -187,6 +193,7 @@ func pollStats(m *ebpf.Map, stopc <-chan os.Signal) {
 			var key ConnKey
 			var stats ConnStats
 			var count int
+			procCounts := make(map[string]int)
 
 			iter := m.Iterate()
 			for iter.Next(&key, &stats) {
@@ -201,13 +208,18 @@ func pollStats(m *ebpf.Map, stopc <-chan os.Signal) {
 				packetsTotal.WithLabelValues("tx").Add(float64(stats.TxPackets - last.txPackets))
 				packetsTotal.WithLabelValues("rx").Add(float64(stats.RxPackets - last.rxPackets))
 
+				comm := processLabel(string(bytes.TrimRight(stats.Comm[:], "\x00")))
+				procCounts[comm]++
+
+				processBytesTotal.WithLabelValues(comm, "tx").Add(float64(stats.TxBytes - last.txBytes))
+				processBytesTotal.WithLabelValues(comm, "rx").Add(float64(stats.RxBytes - last.rxBytes))
+
 				lastReported[key] = reported{
 					txBytes:   stats.TxBytes,
 					rxBytes:   stats.RxBytes,
 					txPackets: stats.TxPackets,
 					rxPackets: stats.RxPackets,
 				}
-				comm := string(bytes.TrimRight(stats.Comm[:], "\x00"))
 
 				if *verbose {
 					src := net.IP(intToBytes(key.Saddr))
@@ -222,6 +234,11 @@ func pollStats(m *ebpf.Map, stopc <-chan os.Signal) {
 			}
 
 			activeConnections.Set(float64(count))
+
+			processConnectionsActive.Reset()
+			for p, n := range procCounts {
+				processConnectionsActive.WithLabelValues(p).Set(float64(n))
+			}
 
 			if err := iter.Err(); err != nil {
 				log.Printf("iterating map: %v", err)
@@ -279,6 +296,25 @@ func recordEvent(event Event) {
 				src, dst, event.Dport, float64(event.DurationNs)/1e9)
 		}
 	}
+}
+
+// processLabel bound label cardinallity by bucketing uattributed connections
+// as "unknown" and any process beyond maxProcessLabels as "other".
+func processLabel(comm string) string {
+	if comm == "" {
+		return "unknown"
+	}
+
+	if seenProcesses[comm] {
+		return comm
+	}
+
+	if len(seenProcesses) >= maxProcessLabels {
+		return "other"
+	}
+
+	seenProcesses[comm] = true
+	return comm
 }
 
 func intToBytes(ip uint32) []byte {
