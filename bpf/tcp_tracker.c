@@ -39,6 +39,13 @@ struct conn_stats {
     u64 rx_bytes;
     u64 tx_packets;
     u64 rx_packets;
+    u32 pid;
+    u8  comm[16];
+};
+
+struct conn_owner {
+    u32 pid;
+    u8  comm[16];    
 };
 
 struct {
@@ -67,6 +74,13 @@ struct {
     __type(value, u64);
 } conn_connect_time SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 10240);
+    __type(key, struct latency_key);
+    __type(value, struct conn_owner);
+} conn_pid_map SEC(".maps");
+
 SEC("kprobe/tcp_connect")
 int BPF_KPROBE(trace_tcp_connect, struct sock *sk) {
     struct event *e;
@@ -81,6 +95,18 @@ int BPF_KPROBE(trace_tcp_connect, struct sock *sk) {
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     
+
+    struct latency_key okey = {};
+    okey.saddr = e->saddr;
+    okey.daddr = e->daddr;
+    okey.dport = e->dport;
+
+    struct conn_owner owner = {};
+    owner.pid = e->pid;
+    bpf_get_current_comm(&owner.comm, sizeof(owner.comm));
+
+    bpf_map_update_elem(&conn_pid_map, &okey, &owner, BPF_ANY);
+
     bpf_ringbuf_submit(e, 0);
     return 0;
 } 
@@ -96,6 +122,18 @@ int BPF_KPROBE(trace_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t si
     struct conn_stats *stats = bpf_map_lookup_elem(&conn_stats_map, &key);
     if (!stats) {
         struct conn_stats new_stats = {};
+        
+        struct latency_key okey = {};
+        okey.saddr = key.saddr;
+        okey.daddr = key.daddr;
+        okey.dport = key.dport;
+
+        struct conn_owner *owner = bpf_map_lookup_elem(&conn_pid_map, &okey);
+        if (owner) {
+            new_stats.pid = owner->pid;
+            __builtin_memcpy(&new_stats.comm, owner->comm, sizeof(new_stats.comm));
+        }
+
         bpf_map_update_elem(&conn_stats_map, &key, &new_stats, BPF_NOEXIST);
         stats = bpf_map_lookup_elem(&conn_stats_map, &key);
         if (!stats) return 0;
@@ -117,6 +155,18 @@ int BPF_KPROBE(trace_tcp_recvmsg, struct sock *sk, struct msghdr *msg, size_t le
     struct conn_stats *stats = bpf_map_lookup_elem(&conn_stats_map, &key);
     if (!stats) {
         struct conn_stats new_stats = {};
+        
+        struct latency_key okey = {};
+        okey.saddr = key.saddr;
+        okey.daddr = key.daddr;
+        okey.dport = key.dport;
+
+        struct conn_owner *owner = bpf_map_lookup_elem(&conn_pid_map, &okey);
+        if (owner) {
+            new_stats.pid = owner->pid;
+            __builtin_memcpy(&new_stats.comm, owner->comm, sizeof(new_stats.comm));
+        }
+
         bpf_map_update_elem(&conn_stats_map, &key, &new_stats, BPF_NOEXIST);
         stats = bpf_map_lookup_elem(&conn_stats_map, &key);
         if (!stats) return 0;
@@ -186,6 +236,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
             stats_key.dport = key.dport;
 
             bpf_map_delete_elem(&conn_stats_map, &stats_key);
+            bpf_map_delete_elem(&conn_pid_map, &key);
 
             struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (e) {
@@ -200,6 +251,28 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
         }
     }
 
+    return 0;
+}
+
+SEC("kretprobe/inet_csk_accept")
+int BPF_KRETPROBE(trace_inet_csk_accept, struct sock *sk) {
+    if (!sk) return 0;
+
+    u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
+    if (family != 2 && family != 10) return 0;
+
+    struct latency_key okey = {};
+    okey.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+    okey.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+    okey.dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+
+    if (okey.saddr == 0 && okey.daddr == 0) return 0;
+
+    struct conn_owner owner = {};
+    owner.pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_get_current_comm(&owner.comm, sizeof(owner.comm));
+
+    bpf_map_update_elem(&conn_pid_map, &okey, &owner, BPF_ANY);
     return 0;
 }
 

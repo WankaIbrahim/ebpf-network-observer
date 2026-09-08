@@ -57,6 +57,9 @@ type ConnStats struct {
 	RxBytes   uint64
 	TxPackets uint64
 	RxPackets uint64
+	Pid       uint32
+	Comm      [16]byte
+	_         [4]byte
 }
 
 type reported struct {
@@ -139,6 +142,13 @@ func attachProbes(objs *TcpTrackerObjects) ([]link.Link, error) {
 	}
 	links = append(links, tp)
 
+	krAccept, err := link.Kretprobe("inet_csk_accept", objs.TcpTrackerPrograms.TraceInetCskAccept, nil);
+	if err != nil {
+		closeLinks(links)
+		return nil, fmt.Errorf("inet_csk_accept kretprobe: %w", err)
+	}
+	links = append(links, krAccept)
+
 	return links, nil
 }
 
@@ -197,13 +207,15 @@ func pollStats(m *ebpf.Map, stopc <-chan os.Signal) {
 					txPackets: stats.TxPackets,
 					rxPackets: stats.RxPackets,
 				}
+				comm := string(bytes.TrimRight(stats.Comm[:], "\x00"))
 
 				if *verbose {
 					src := net.IP(intToBytes(key.Saddr))
 					dst := net.IP(intToBytes(key.Daddr))
-					fmt.Printf("SRC: %-20s DST: %-20s TX: %d bytes (%d packets) RX: %d bytes (%d packets)\n",
+					fmt.Printf("SRC: %-20s DST: %-20s COMM: %-16s TX: %d bytes (%d packets) RX: %d bytes (%d packets)\n",
 						fmt.Sprintf("%s:%d", src, key.Sport),
 						fmt.Sprintf("%s:%d", dst, key.Dport),
+						comm,
 						stats.TxBytes, stats.TxPackets,
 						stats.RxBytes, stats.RxPackets)
 				}

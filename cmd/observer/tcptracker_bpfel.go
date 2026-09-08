@@ -21,12 +21,21 @@ type TcpTrackerConnKey struct {
 	Dport uint16
 }
 
+type TcpTrackerConnOwner struct {
+	_    structs.HostLayout
+	Pid  uint32
+	Comm [16]uint8
+}
+
 type TcpTrackerConnStats struct {
 	_         structs.HostLayout
 	TxBytes   uint64
 	RxBytes   uint64
 	TxPackets uint64
 	RxPackets uint64
+	Pid       uint32
+	Comm      [16]uint8
+	_         [4]byte
 }
 
 type TcpTrackerLatencyKey struct {
@@ -41,9 +50,11 @@ type TcpTrackerLatencyKey struct {
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
 	TcpTrackerMapConnConnectTime        = "conn_connect_time"
+	TcpTrackerMapConnPidMap             = "conn_pid_map"
 	TcpTrackerMapConnStartTime          = "conn_start_time"
 	TcpTrackerMapConnStatsMap           = "conn_stats_map"
 	TcpTrackerMapEvents                 = "events"
+	TcpTrackerProgTraceInetCskAccept    = "trace_inet_csk_accept"
 	TcpTrackerProgTraceInetSockSetState = "trace_inet_sock_set_state"
 	TcpTrackerProgTraceTcpConnect       = "trace_tcp_connect"
 	TcpTrackerProgTraceTcpRecvmsg       = "trace_tcp_recvmsg"
@@ -92,6 +103,7 @@ type TcpTrackerSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type TcpTrackerProgramSpecs struct {
+	TraceInetCskAccept    *ebpf.ProgramSpec `ebpf:"trace_inet_csk_accept"`
 	TraceInetSockSetState *ebpf.ProgramSpec `ebpf:"trace_inet_sock_set_state"`
 	TraceTcpConnect       *ebpf.ProgramSpec `ebpf:"trace_tcp_connect"`
 	TraceTcpRecvmsg       *ebpf.ProgramSpec `ebpf:"trace_tcp_recvmsg"`
@@ -103,6 +115,7 @@ type TcpTrackerProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type TcpTrackerMapSpecs struct {
 	ConnConnectTime *ebpf.MapSpec `ebpf:"conn_connect_time"`
+	ConnPidMap      *ebpf.MapSpec `ebpf:"conn_pid_map"`
 	ConnStartTime   *ebpf.MapSpec `ebpf:"conn_start_time"`
 	ConnStatsMap    *ebpf.MapSpec `ebpf:"conn_stats_map"`
 	Events          *ebpf.MapSpec `ebpf:"events"`
@@ -135,6 +148,7 @@ func (o *TcpTrackerObjects) Close() error {
 // It can be passed to LoadTcpTrackerObjects or ebpf.CollectionSpec.LoadAndAssign.
 type TcpTrackerMaps struct {
 	ConnConnectTime *ebpf.Map `ebpf:"conn_connect_time"`
+	ConnPidMap      *ebpf.Map `ebpf:"conn_pid_map"`
 	ConnStartTime   *ebpf.Map `ebpf:"conn_start_time"`
 	ConnStatsMap    *ebpf.Map `ebpf:"conn_stats_map"`
 	Events          *ebpf.Map `ebpf:"events"`
@@ -143,6 +157,7 @@ type TcpTrackerMaps struct {
 func (m *TcpTrackerMaps) Close() error {
 	return _TcpTrackerClose(
 		m.ConnConnectTime,
+		m.ConnPidMap,
 		m.ConnStartTime,
 		m.ConnStatsMap,
 		m.Events,
@@ -159,6 +174,7 @@ type TcpTrackerVariables struct {
 //
 // It can be passed to LoadTcpTrackerObjects or ebpf.CollectionSpec.LoadAndAssign.
 type TcpTrackerPrograms struct {
+	TraceInetCskAccept    *ebpf.Program `ebpf:"trace_inet_csk_accept"`
 	TraceInetSockSetState *ebpf.Program `ebpf:"trace_inet_sock_set_state"`
 	TraceTcpConnect       *ebpf.Program `ebpf:"trace_tcp_connect"`
 	TraceTcpRecvmsg       *ebpf.Program `ebpf:"trace_tcp_recvmsg"`
@@ -167,6 +183,7 @@ type TcpTrackerPrograms struct {
 
 func (p *TcpTrackerPrograms) Close() error {
 	return _TcpTrackerClose(
+		p.TraceInetCskAccept,
 		p.TraceInetSockSetState,
 		p.TraceTcpConnect,
 		p.TraceTcpRecvmsg,
