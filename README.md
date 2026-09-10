@@ -28,6 +28,20 @@ When the agent starts, it loads compiled eBPF bytecode into the kernel and attac
 
 The Go agent loads and attaches these programs,reads new connection events off the ring buffer as they arrive, and poills the hash map every two seconds to print a liver throughput summary
 
+## Known Limitations
+
+**Process attribution is best-effort.** Connection ownership is captured at tcp_connect and inet_csk_accept, where the calling process context is reliable and stored in a separate map that the send and receive probes look up.
+
+Connections already established before the agent started, sockets where the local port is not yet bound and overwritten entries will show no owner.
+
+Unattributed traffic is grouped under the unknown label rather than being discarded.
+
+Connection county may overcount. This is because during the clean up after a connection is closed, the key used for the connection may not be reconstructable or the connection may not close cleanly. This is eventually removed by the LRU.
+
+IPv6 only as addresses are read as 32-bit valus throughout. IPv6 sockets carrying IPv4 traffic is handled, but native IPv6 connections are not tracked.
+
+Process label cardinality is capped after which further processes are grouped as other to prevent unbounded time series growth.
+
 ## Tech Stack
 
 - Go
