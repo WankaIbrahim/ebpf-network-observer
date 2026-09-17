@@ -66,3 +66,11 @@ var processConnectionsActive = promauto.NewGaugeVec(
 	},
 	[]string{"process"},
 )
+
+var anomaliesTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "ebpf_network_anomalies_total",
+		Help: "Total anomalies detected, by type and process",
+	},
+	[]string{"type", "process"},
+)

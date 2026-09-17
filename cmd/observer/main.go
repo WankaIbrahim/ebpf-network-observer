@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,7 +38,10 @@ const (
 var (
 	verbose = flag.Bool("v", false, "print individual events to stdout")
 
+	seenProcessesMu sync.Mutex
 	seenProcesses = make(map[string]bool)
+
+	scanner = newScanDetector()
 )
 
 type Event struct {
@@ -278,6 +282,16 @@ func recordEvent(event Event) {
 	switch event.EventType {
 	case eventTypeConnect:
 		connectionsTotal.Inc()
+		comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
+		dest := fmt.Sprintf("%s:%d", dst, event.Dport)
+
+		if scanner.observe(comm, dest) {
+			label := processLabel(comm)
+			anomaliesTotal.WithLabelValues("port_scan", label).Inc()
+			log.Printf("ANOMALY: possible scan. Process %q contacted %d distinct destinations in %s",
+				comm, scanThreshold, scanWindow)
+		}
+
 		if *verbose {
 			comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
 			fmt.Printf("PID: %-6d COMM: %-20s SRC: %-20s DST: %s:%d\n",
@@ -301,6 +315,9 @@ func recordEvent(event Event) {
 // processLabel bound label cardinallity by bucketing uattributed connections
 // as "unknown" and any process beyond maxProcessLabels as "other".
 func processLabel(comm string) string {
+	seenProcessesMu.Lock()
+	defer seenProcessesMu.Unlock()
+
 	if comm == "" {
 		return "unknown"
 	}
