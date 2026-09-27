@@ -53,11 +53,12 @@ Connections already established before the agent started, sockets where the loca
 - Linux kernel 6.x+ with BTF enabled
 - CO-RE (Compile Once, Run Everywhere) for kernel portability
 - Prometheus and Grafana, run via Docker Compose
+- Docker and Kubernetes, deployed as a DaemonSet and tested on k3s
 
 ## Prerequisites
 
 - Linux with kernel 6.x+ and BTF enabled
-- Go 1.22+
+- Go 1.25+
 - clang/LLVM
 - libbpf-dev
 - bpftool
@@ -89,6 +90,25 @@ docker compose up -d
 
 Grafana is then available at `http://localhost:3000` (admin/admin) and Prometheus at `http://localhost:9090`. Import `deploy/grafana-dashboard.json` via Dashboards → New → Import and select the Prometheus data source.
 
+## Kubernetes deployment
+
+The agent runs as a DaemonSet, which schedules one pod on every node in the cluster. This is the standard shape for a node-level agent: each node needs its own observer, and no node needs two.
+
+Build the image and import it into the cluster:
+
+```bash
+docker build -t ebpf-observer:latest .
+docker save ebpf-observer:latest | sudo k3s ctr images import -
+```
+
+Deploy it:
+
+```bash
+sudo k3s kubectl apply -f deploy/daemonset.yaml
+sudo k3s kubectl get pods -o wide
+sudo k3s kubectl logs -l app=ebpf-observer
+```
+
 ## Current features
 
 - Per-process TCP connection tracking (PID, process name, source/destination IP and port), for both inbound and outbound connections
@@ -97,10 +117,10 @@ Grafana is then available at `http://localhost:3000` (admin/admin) and Prometheu
 - Prometheus metrics endpoint with bounded label cardinality
 - Grafana dashboard covering throughput, connection rate, latency percentiles, and top talkers by process
 - Port scan detection using a sliding window of distinct destinations per process
+- Runs as a Kubernetes DaemonSet, observing all processes on the node from inside a container
 - Clean shutdown on Ctrl+C with automatic probe detachment
 
 ## Planned
 
 - Latency spike detection using EWMA baselines and z-score thresholds
 - DNS visibility and entropy analysis for exfiltration patterns
-- Kubernetes DaemonSet deployment with pod-level flow attribution
