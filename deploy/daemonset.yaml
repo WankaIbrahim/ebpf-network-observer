@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ebpf-observer
+  labels:
+    app: ebpf-observer
+spec:
+  selector:
+    matchLabels:
+      app: ebpf-observer
+  template:
+    metadata:
+      labels:
+        app: ebpf-observer
+    spec:
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: observer
+          image: ebpf-observer:latest
+          imagePullPolicy: Never
+          securityContext:
+            privileged: true
+          ports:
+            - name: metrics
+              containerPort: 2112
+              protocol: TCP
+          volumeMounts:
+            - name: sys-kernel-btf
+              mountPath: /sys/kernel/btf
+              readOnly: true
+            - name: sys-fs-bpf
+              mountPath: /sys/fs/bpf
+            - name: sys-kernel-debug
+              mountPath: /sys/kernel/debug
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: sys-kernel-btf
+          hostPath:
+            path: /sys/kernel/btf
+        - name: sys-fs-bpf
+          hostPath:
+            path: /sys/fs/bpf
+        - name: sys-kernel-debug
+          hostPath:
+            path: /sys/kernel/debug
